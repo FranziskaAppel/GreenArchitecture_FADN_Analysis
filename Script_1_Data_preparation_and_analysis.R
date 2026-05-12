@@ -5,34 +5,104 @@
 #   - Prepare variables (CDI, fertilizer use, subsidies)
 #   - Match farms with and without subsidies
 #   - Perform statistical analysis (mean differences, t-tests)
+#   - Calculate environmental benefits (GHG-based monetisation)
 #   - Save outputs for visualization
+#
+# =============================================================================
+# ASSUMPTIONS & PARAMETERS FOR BENEFIT CALCULATION
+# =============================================================================
+#
+# 1. Nitrogen Fertilizer — GHG Emission Factor
+#    Total emission factor: 9.91 kg CO2-eq per kg N
+#    Composed of:
+#      - Direct N2O emissions:      4.68  kg CO2-eq/kg N
+#          Source: IPCC (2006), Tier 1 default emission factor
+#      - Indirect — volatilisation: 0.47  kg CO2-eq/kg N
+#          Source: IPCC (2006), Table 11.3
+#      - Indirect — leaching/runoff:1.05  kg CO2-eq/kg N
+#          Source: IPCC (2006), Table 11.3
+#      - Fertilizer production:     3.70  kg CO2-eq/kg N
+#          Source: Brentrup & Pallière (2008), International Fertiliser Society
+#    Reference: Brentrup, F. & Pallière, C. (2008). GHG emissions and energy
+#      efficiency in European nitrogen fertiliser production and use.
+#      Proceedings 639, International Fertiliser Society, York, UK.
+#
+# 2. Permanent Grassland — GHG Emission Factor
+#    Emission factor for arable land:     1,194.676 kg CO2-eq/ha/year
+#    Emission factor for permanent grassland: 781.35 kg CO2-eq/ha/year
+#    => Net reduction per ha converted:     413.326 kg CO2-eq/ha/year
+#    Source: IPCC (2006) Guidelines for National Greenhouse Gas Inventories,
+#      Chapter 6 (Land Use, Land-Use Change, and Forestry), Tier 1 defaults.
+#
+# 3. Crop Diversity Index (CDI) — Farm Performance Effect
+#    Coefficient: 0.102 (i.e., +10.2% farm performance per 1-unit CDI increase)
+#    Used as proxy for farm-level economic benefit of diversification.
+#    Source: Nilsson, P. et al. (2022). Crop diversity and farm performance:
+#      Evidence from Swedish farm-level data. Journal of Agricultural Economics.
+#      https://doi.org/10.1111/1477-9552.12471
+#
+# 4. Carbon Price
+#    Price: EUR 70 per tonne CO2 (= EUR 0.07 per kg CO2)
+#    Rationale: Reflects EU ETS price range and social cost estimates
+#      used in European agricultural policy impact assessments (ca. 2022/2023).
+#
 # =============================================================================
 
 # --- Load required packages ---
 library(dplyr)
+library(tidyr)
 library(knitr)
 library(ggplot2)
+library(here)
 
 # --- Define directories ---
-main_dir <- "N:/Green Architecture/FADN/Data"           # Input directory
-analysis_dir <- "N:/Green Architecture/FADN/Analysis"  # Output directory
+# Uses the {here} package to build paths relative to the project root (.Rproj).
+# Expected folder structure:
+#   <project_root>/
+#     data/        <- raw FADN input files (one CSV per country-year)
+#     analysis/    <- output files (summary stats, benefit summary, plots)
+main_dir     <- here("data")
+analysis_dir <- here("analysis")
 
 # --- Define countries, years, and subsidy measures of interest ---
 countries <- c("DEU", "POL", "OST", "DAN", "ITA", "LTU", "NED", "HUN", "FRA")
 years <- c("2021", "2022")
-measures <- c("SE621", "SORGSUB_2_V")  
+measures <- c("SE621", "SORGSUB_2_V")
 # SE621        = Environmental subsidies
 # SORGSUB_2_V  = Organic farming subsidy
+
+# --- Parameters for benefit calculation (see header for full references) ---
+# Adjust these values if you want to use alternative emission factors or prices.
+
+# Nitrogen emission factor [kg CO2-eq / kg N]
+# Sources: IPCC (2006) Ch. 11; Brentrup & Palliere (2008), Int. Fertiliser Society
+EF_NITROGEN  <- 9.91
+
+# Grassland emission factors [kg CO2-eq / ha / year]
+# Source: IPCC (2006) Guidelines, Ch. 6 (LULUCF), Tier 1 defaults
+EF_ARABLE    <- 1194.676
+EF_GRASSLAND <-  781.35
+EF_GRASS_RED <- EF_ARABLE - EF_GRASSLAND   # = 413.326 kg CO2-eq / ha / year
+
+# Carbon price [EUR / tonne CO2] — EU ETS reference value ~2022/2023
+CARBON_PRICE <- 70 / 1000                  # convert to EUR per kg CO2
+
+# CDI performance coefficient [-]
+# Source: Nilsson et al. (2022), doi:10.1111/1477-9552.12471
+CDI_COEFF    <- 0.102                      # 10.2% farm performance per 1-unit CDI increase
+
+# Derived unit prices (computed from parameters above — do not edit directly)
+PRICE_PER_KG_N     <- EF_NITROGEN  * CARBON_PRICE   # EUR per kg N reduced      (= 0.6937)
+PRICE_PER_HA_GRASS <- EF_GRASS_RED * CARBON_PRICE   # EUR per ha grassland gained (= 28.93)
 
 # -----------------------------------------------------------------------------
 # Load and merge datasets
 # -----------------------------------------------------------------------------
 all_countries_years <- list()
-setwd(file.path(main_dir))
 
 for (country in countries) {
   for (year in years) {
-    FADN <- read.csv(paste0(country, year, "SO.csv"))
+    FADN <- read.csv(file.path(main_dir, paste0(country, year, "SO.csv")))
     list_name <- paste(country, year, sep = "_")
     all_countries_years[[list_name]] <- FADN
   }
@@ -42,12 +112,10 @@ for (country in countries) {
 FADN_combined <- bind_rows(all_countries_years)
 
 # Save combined dataset for reuse
-setwd(file.path(analysis_dir))
-write.csv(FADN_combined, "FADN_combined_all.csv", row.names = FALSE)
+write.csv(FADN_combined, file.path(analysis_dir, "FADN_combined_all.csv"), row.names = FALSE)
 
 # Alternatively: load pre-combined dataset
-setwd(file.path(analysis_dir))
-FADN_combined_all <- read.csv("FADN_combined_all.csv") %>% 
+FADN_combined_all <- read.csv(file.path(analysis_dir, "FADN_combined_all.csv")) %>%
   filter(SE025 >= 1)   # Exclude farms with 0 ha UAA
 
 # -----------------------------------------------------------------------------
@@ -220,3 +288,43 @@ final_t_test_results <- bind_rows(t_test_results_list)
 # -----------------------------------------------------------------------------
 write.csv(final_summary_stats, file.path(analysis_dir, "final_summary_stats.csv"), row.names = FALSE)
 write.csv(final_t_test_results, file.path(analysis_dir, "final_t_test_results.csv"), row.names = FALSE)
+
+# -----------------------------------------------------------------------------
+# Calculate environmental benefits based on GHG emission reductions
+# Parameters (EF_NITROGEN, EF_GRASS_RED, CARBON_PRICE, CDI_COEFF) are defined
+# at the top of the script alongside the directory and country settings.
+# See header above and docs/methodology.md for full methodological references.
+# -----------------------------------------------------------------------------
+
+# --- Pivot summary stats: With_Subsidy vs. No_Subsidy side-by-side ---
+benefit_summary <- final_summary_stats %>%
+  select(group, COUNTRY, YEAR, measure,
+         mean_nitrogen, mean_grass, mean_cdi, mean_Payments) %>%
+  pivot_wider(
+    names_from  = group,
+    values_from = c(mean_nitrogen, mean_grass, mean_cdi, mean_Payments)
+  ) %>%
+  mutate(
+    # Monetary benefit from reduced nitrogen use (EUR/ha UAA)
+    # Formula: (N_no_subsidy - N_with_subsidy) [kg N/ha] * PRICE_PER_KG_N [EUR/kg N]
+    # Sources: IPCC (2006); Brentrup & Pallière (2008)
+    benefit_nitrogen = (mean_nitrogen_No_Subsidy - mean_nitrogen_With_Subsidy) * PRICE_PER_KG_N,
+
+    # Difference in permanent grassland share (With - No subsidy) [share of UAA]
+    # Reported as raw share difference; for absolute EUR benefit multiply by
+    # farm UAA [ha] * PRICE_PER_HA_GRASS [EUR/ha]
+    # Source: IPCC (2006) Ch. 6 LULUCF
+    benefit_grass = mean_grass_With_Subsidy - mean_grass_No_Subsidy,
+
+    # Farm performance benefit from increased crop diversity [% of farm performance]
+    # Formula: (CDI_with - CDI_no) * CDI_COEFF * 100
+    # Source: Nilsson et al. (2022), doi:10.1111/1477-9552.12471
+    cdi_change_percent = (mean_cdi_With_Subsidy - mean_cdi_No_Subsidy) * CDI_COEFF * 100,
+
+    # Mean difference in total subsidy payments between groups (EUR/ha UAA)
+    diff_payments = mean_Payments_With_Subsidy - mean_Payments_No_Subsidy
+  ) %>%
+  select(COUNTRY, YEAR, measure,
+         benefit_nitrogen, benefit_grass, cdi_change_percent, diff_payments)
+
+write.csv(benefit_summary, file.path(analysis_dir, "benefit_summary.csv"), row.names = FALSE)
