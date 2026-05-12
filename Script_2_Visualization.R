@@ -11,15 +11,16 @@ library(dplyr)
 library(knitr)
 library(ggplot2)
 library(grid)
+library(here)
 
-# --- Define input/output directories (adjust for your system) ---
-# Desktop PC
-main_dir <- "N:/nc.iamo.de/Anträge/Green Architecture/FADN/Data"
-analysis_dir <- "N:/nc.iamo.de/Anträge/Green Architecture/FADN/Analysis"
-
-# Framework Notebook
-main_dir <- "C:/Users/Appel/Nextcloud2/Anträge/Green Architecture/FADN/Data"
-analysis_dir <- "C:/Users/Appel/Nextcloud2/Anträge/Green Architecture/FADN/Analysis"
+# --- Define directories ---
+# Uses the {here} package to build paths relative to the project root (.Rproj).
+# Expected folder structure:
+#   <project_root>/
+#     data/        <- raw FADN input files (one CSV per country-year)
+#     analysis/    <- output files (summary stats, benefit summary, plots)
+main_dir     <- here("data")
+analysis_dir <- here("analysis")
 
 # --- Define countries, years, and subsidy measures of interest ---
 countries <- c("DEU", "POL", "OST", "DAN", "ITA", "LTU", "NED", "HUN", "FRA")
@@ -27,8 +28,7 @@ years <- c("2021", "2022")
 measures <- c("SE621", "SORGSUB_2_V")
 
 # --- Load processed summary statistics ---
-setwd(file.path(analysis_dir))
-final_summary_stats <- read.csv("final_summary_stats.csv")
+final_summary_stats <- read.csv(file.path(analysis_dir, "final_summary_stats.csv"))
 
 # -----------------------------------------------------------------------------
 # Prepare dataset for plotting
@@ -99,7 +99,7 @@ plot_grouped_bar(plot_data, "mean_grass", "se_grass",
 # -----------------------------------------------------------------------------
 # Benefit plots (combined per measure)
 # -----------------------------------------------------------------------------
-benefit_data <- read.csv("benefit_summary.csv")
+benefit_data <- read.csv(file.path(analysis_dir, "benefit_summary.csv"))
 
 measure_labels <- c("SE621" = "Environmental Subsidy", "SORGSUB_2_V" = "Organic")
 
@@ -143,7 +143,7 @@ for (m in unique(plot_data$measure)) {
   print(p4, vp = viewport(layout.pos.row = 1, layout.pos.col = 1))
   
   # Save combined plot
-  jpeg(filename = paste0("combined_plot_", m, "_2022.jpg"), width = 1000, height = 1500, res = 150)
+  jpeg(filename = file.path(analysis_dir, paste0("combined_plot_", m, "_2022.jpg")), width = 1000, height = 1500, res = 150)
   grid.newpage()
   pushViewport(viewport(layout = grid.layout(4, 1)))
   print(p1, vp = viewport(layout.pos.row = 2, layout.pos.col = 1))
